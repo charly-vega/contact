@@ -1,16 +1,24 @@
 const request = require('request');
 const restify = require('restify');
+const corsMiddleware = require('restify-cors-middleware');
 const Handlebars = require('handlebars');
 const fs = require('fs');
 const path = require('path');
 const config = require('indecent');
+const AWS = require('aws-sdk');
 
 const { chain, get, indexOf, merge, set, startCase } = require('lodash');
 
-const knownEmails = get(config, 'emails');
+const cors = corsMiddleware({
+  origins: ['*'],
+  allowHeaders: ['*'],
+  exposeHeaders: ['*']
+});
+ 
+const KNOWN_EMAILS = (process.env.KNOWN_EMAILS || '').split(',');
 
-const MAILGUN_URL = get(config, 'mailgun.url');
-const MAILGUN_API_KEY = get(config, 'mailgun.key');
+const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
+const AWS_SES_MAIL_FROM = process.env.AWS_SES_MAIL_FROM;
 
 const FORM_FIELDS = [
   '_from',
@@ -29,10 +37,15 @@ const htmlSource = fs.readFileSync(path.join(__dirname, 'html_template.hbs'), { 
 const textSource = fs.readFileSync(path.join(__dirname, 'text_template.hbs'), { encoding: 'utf8' });
 const htmlTemplate = Handlebars.compile(htmlSource);
 const textTemplate = Handlebars.compile(textSource);
-
+ 
 var server = restify.createServer();
-server.use(restify.CORS());
+server.pre(cors.preflight);
+server.use(cors.actual);
 server.use(restify.bodyParser());
+// server.use(restify.plugins.throttle({
+//   rate: 1,
+//   xff: true
+// }));
 
 server.get('/status', (req, res, next) => {
   res.send('contact running');
@@ -41,21 +54,11 @@ server.get('/status', (req, res, next) => {
 server.post('/:_to', (req, res, next) => {
   const { formData, fields } = parseRequest(req);
 
-  if (indexOf(knownEmails, get(formData, 'to')) < 0) {
+  if (indexOf(KNOWN_EMAILS, get(formData, 'to')) < 0) {
     return next(new Error('Unknown email address'));
   }
 
-  const params = {
-    formData,
-    auth: {
-      user: 'api',
-      pass: MAILGUN_API_KEY
-    },
-    url: MAILGUN_URL,
-    method: 'post'
-  };
-
-  sendMail(fields, params).then(response => {
+  sendMail(fields, { formData }).then(response => {
     const redirect = get(fields, 'next');
     if (redirect) {
       res.redirect(redirect, next);
@@ -119,17 +122,26 @@ function sendMail (fields, params) {
     return Promise.resolve(merge({ message: 'fake response' }, params));
   }
 
-  return new Promise((resolve, reject) => {
-    request(params, (error, msg, response) => {
-      if (error) {
-        return reject(error);
-      }
-
-      return resolve(JSON.parse(response));
-    });
-  });
+  return new AWS.SES({ region: AWS_REGION }).sendEmail({
+    Destination: { ToAddresses: [get(params, ['formData', 'to'])] },
+    Source: AWS_SES_MAIL_FROM,
+    ReplyToAddresses: [],
+    Message: {
+      Body: {
+        Html: { Charset: "UTF-8", Data: params.formData.html },
+        Text: { Charset: "UTF-8", Data: params.formData.text }
+      },
+      Subject: { Charset: "UTF-8", Data: params.formData.subject }
+    },
+    Tags: []
+  }).promise();
 }
 
-server.listen(8081, () => {
-  console.log(`${server.name} listening at ${server.url}`);
-});
+server.listen(
+  process.env.PORT || 3000,
+  process.env.HOST || '0.0.0.0',
+  () => { 
+    console.log(`${server.name} listening at ${server.url}`);
+  }
+);
+
