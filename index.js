@@ -6,8 +6,13 @@ const fs = require('fs');
 const path = require('path');
 const config = require('indecent');
 const AWS = require('aws-sdk');
+const nodemailer = require('nodemailer');
 
 const { chain, get, indexOf, merge, set, startCase } = require('lodash');
+
+const mailer = nodemailer.createTransport({
+  SES: new AWS.SES({ region: AWS_REGION }),
+});
 
 const cors = corsMiddleware({
   origins: ['*'],
@@ -122,19 +127,18 @@ function sendMail (fields, params) {
     return Promise.resolve(merge({ message: 'fake response' }, params));
   }
 
-  return new AWS.SES({ region: AWS_REGION }).sendEmail({
-    Destination: { ToAddresses: [get(params, ['formData', 'to'])] },
-    Source: AWS_SES_MAIL_FROM,
-    ReplyToAddresses: [],
-    Message: {
-      Body: {
-        Html: { Charset: "UTF-8", Data: params.formData.html },
-        Text: { Charset: "UTF-8", Data: params.formData.text }
-      },
-      Subject: { Charset: "UTF-8", Data: params.formData.subject }
-    },
-    Tags: []
-  }).promise();
+  const { formData } = params;
+
+  return new Promise((resolve, reject) =>
+    mailer.sendMail({
+      from: AWS_SES_MAIL_FROM,
+      attachments: [formData.attachment],
+      ...formData,
+    }, (error, info) => {
+      if (error) return reject(error);
+      resolve(info, { messageId: info.messageId });
+    })
+  );
 }
 
 server.listen(
