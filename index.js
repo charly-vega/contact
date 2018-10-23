@@ -10,10 +10,6 @@ const nodemailer = require('nodemailer');
 
 const { chain, get, indexOf, merge, set, startCase } = require('lodash');
 
-const mailer = nodemailer.createTransport({
-  SES: new AWS.SES({ region: AWS_REGION }),
-});
-
 const cors = corsMiddleware({
   origins: ['*'],
   allowHeaders: ['*'],
@@ -24,6 +20,10 @@ const KNOWN_EMAILS = (process.env.KNOWN_EMAILS || '').split(',');
 
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const AWS_SES_MAIL_FROM = process.env.AWS_SES_MAIL_FROM;
+
+const mailer = nodemailer.createTransport({
+  SES: new AWS.SES({ region: AWS_REGION })
+});
 
 const FORM_FIELDS = [
   '_from',
@@ -109,11 +109,9 @@ function parseRequest (req) {
     const value = get(fields, 'fake') ? filePath : fs.createReadStream(filePath);
 
     set(formData, 'attachment', {
-      value,
-      options: {
-        filename: get(attachment, 'name'),
-        contentType: get(attachment, 'type')
-      }
+      content: value,
+      filename: get(attachment, 'name'),
+      contentType: get(attachment, 'type')
     });
   }
 
@@ -132,7 +130,7 @@ function sendMail (fields, params) {
   return new Promise((resolve, reject) =>
     mailer.sendMail({
       from: AWS_SES_MAIL_FROM,
-      attachments: [formData.attachment],
+      attachments: formData.attachment ? [formData.attachment] : [],
       ...formData,
     }, (error, info) => {
       if (error) return reject(error);
