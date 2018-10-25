@@ -35,7 +35,8 @@ const FORM_FIELDS = [
 const PRIVATE_FIELDS = [
   '_fake',
   '_info',
-  '_next'
+  '_next',
+  '_fail'
 ];
 
 const htmlSource = fs.readFileSync(path.join(__dirname, 'html_template.hbs'), { encoding: 'utf8' });
@@ -64,16 +65,25 @@ server.post('/:_to', (req, res, next) => {
   }
 
   sendMail(fields, { formData }).then(response => {
+    console.log({ context: { namespace: 'sendMail' }, response });
+
     const redirect = get(fields, 'next');
     if (redirect) {
       res.redirect(redirect, next);
     } else {
-      res.json(response);
+      res.json(200, { messageId: response.envelope.messageId, msg: 'ok', code: 200 });
     }
 
     return next();
   }).catch(error => {
-    return next(error);
+    console.error({ context: { namespace: 'sendMail' }, errorMessage: error });
+    
+    const redirect = get(fields, 'fail');
+    if (redirect) {
+      res.redirect(redirect, next);
+    }
+
+    return next(false);
   });
 });
 
