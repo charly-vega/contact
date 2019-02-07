@@ -1,0 +1,25 @@
+version: '3.4'
+
+services:
+  app:
+    image: betalabs/contact
+    environment:
+      AWS_SES_MAIL_FROM: ${settings.mail_from}
+      KNOWN_EMAILS: ${settings.known_emails}
+    networks:
+      - ingress
+    deploy:
+      labels:
+        - com.df.serviceDomain=${settings.hostname}
+        - com.df.distribute=true
+        - com.df.notify=true
+        - com.df.port=3000
+      placement:
+        constraints:
+          - node.role == worker
+
+networks:
+  ingress:
+    external:
+      name: ${ingress_network_name}
+
